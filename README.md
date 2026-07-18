@@ -7,7 +7,7 @@ koi listing in MRP bands ke aas-paas milti hai, Telegram pe alert bhejta hai:
 |------------------|------|
 | Mainline          | ₹179 |
 | Silver Series     | ₹299 |
-| Premium Series    | ₹599 |
+| Premium Series    | ₹549 |
 
 (Thoda upar-neeche tolerance already built-in hai script me.)
 
