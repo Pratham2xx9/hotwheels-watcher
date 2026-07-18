@@ -2,11 +2,14 @@ name: Hot Wheels MRP Watcher
 
 on:
   schedule:
-    - cron: "*/15 * * * *"
-  workflow_dispatch: {}
+    # GitHub Actions enforces a hard platform minimum of 5 minutes between
+    # scheduled runs (even on public repos with unlimited minutes) -- so
+    # this is the fastest reliable interval available.
+    - cron: "*/5 * * * *"
+  workflow_dispatch: {}   # lets you trigger it manually from the Actions tab
 
 permissions:
-  contents: write
+  contents: write   # needed so the workflow can commit seen.json back
 
 jobs:
   check:
