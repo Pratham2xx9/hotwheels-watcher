@@ -4,23 +4,12 @@ Hot Wheels MRP Watcher
 -----------------------
 Searches Amazon.in and FirstCry for "hot wheels" listings and sends a
 Telegram notification whenever a listing is found priced near one of the
-known MRP bands:
-
-    Mainline        -> MRP 179
-    Silver Series    -> MRP 299
-    Premium Series   -> MRP 549
-
-"Near MRP" = price is not marked up much above MRP (no scalper pricing)
-and not absurdly low (likely a different/damaged item). Tolerance is
-configurable below.
+known MRP price points.
 
 Notes / limitations:
 - Amazon actively blocks scrapers with captchas and bot-detection. This
-  script uses polite headers and light retry logic, but it WILL
-  occasionally fail to fetch Amazon results. That's expected -- it will
-  just try again on the next scheduled run.
-- Keep the run interval reasonable (>= 10-15 min) to avoid getting your
-  IP rate-limited or blocked.
+  script can route requests through ScraperAPI (if SCRAPERAPI_KEY is set)
+  to reduce blocking.
 - This is for personal shopping alerts only. Don't hammer the sites.
 """
 
@@ -38,11 +27,8 @@ from bs4 import BeautifulSoup
 
 SEARCH_TERM = "hot wheels"
 
-# All known Hot Wheels MRP price points. Any listing within +/- TOLERANCE_RS
-# rupees of ANY of these prices will trigger a notification.
 KNOWN_MRPS = [179, 299, 298, 167, 549, 599, 749, 899]
-
-TOLERANCE_RS = 100  # allow price to be off by up to +-100 rupees from any known MRP
+TOLERANCE_RS = 100
 
 SEEN_FILE = os.path.join(os.path.dirname(__file__), "seen.json")
 
@@ -56,12 +42,6 @@ HEADERS = {
 
 TELEGRAM_BOT_TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN", "")
 TELEGRAM_CHAT_ID = os.environ.get("TELEGRAM_CHAT_ID", "")
-
-# ScraperAPI (https://www.scraperapi.com/) routes requests through rotating
-# residential/datacenter proxies so Amazon doesn't instantly block the
-# request the way it blocks GitHub's shared runner IPs (503 errors).
-# Free tier gives 1000 requests/month. Leave blank to skip proxying
-# (Amazon will likely keep returning 503 from GitHub Actions in that case).
 SCRAPERAPI_KEY = os.environ.get("SCRAPERAPI_KEY", "")
 
 
@@ -73,10 +53,6 @@ def proxied_get(url, timeout=30):
         return requests.get(proxy_url, params=params, timeout=timeout)
     return requests.get(url, headers=HEADERS, timeout=timeout)
 
-
-# ---------------------------------------------------------------------------
-# HELPERS
-# ---------------------------------------------------------------------------
 
 def load_seen():
     if os.path.exists(SEEN_FILE):
@@ -94,7 +70,6 @@ def save_seen(seen):
 
 
 def matches_mrp_band(price):
-    """Return the closest known MRP if price is within TOLERANCE_RS of it."""
     best_mrp = None
     best_diff = None
     for mrp in KNOWN_MRPS:
@@ -130,7 +105,6 @@ def send_telegram(message):
 
 
 def parse_price(text):
-    """Extract a numeric price from a messy string like '₹1,299' """
     if not text:
         return None
     cleaned = re.sub(r"[^\d.]", "", text.replace(",", ""))
@@ -139,10 +113,6 @@ def parse_price(text):
     except ValueError:
         return None
 
-
-# ---------------------------------------------------------------------------
-# AMAZON SCRAPER
-# ---------------------------------------------------------------------------
 
 def get_amazon_listings():
     url = f"https://www.amazon.in/s?k={SEARCH_TERM.replace(' ', '+')}"
@@ -179,10 +149,6 @@ def get_amazon_listings():
     return results
 
 
-# ---------------------------------------------------------------------------
-# FIRSTCRY SCRAPER
-# ---------------------------------------------------------------------------
-
 def get_firstcry_listings():
     url = f"https://www.firstcry.com/search?q={SEARCH_TERM.replace(' ', '%20')}"
     results = []
@@ -217,10 +183,6 @@ def get_firstcry_listings():
     return results
 
 
-# ---------------------------------------------------------------------------
-# MAIN
-# ---------------------------------------------------------------------------
-
 def main():
     seen = load_seen()
     new_seen = set(seen)
@@ -233,8 +195,6 @@ def main():
     all_listings = amazon_listings + firstcry_listings
     print(f"Fetched {len(all_listings)} total listings.")
 
-    # Print every price found, so we can see in the Actions log whether
-    # scraping is actually returning real data or coming back empty/blocked.
     if all_listings:
         print("[DEBUG] All prices found this run:")
         for item in all_listings:
@@ -253,7 +213,7 @@ def main():
 
         key = item["link"]
         if key in seen:
-            continue  # already notified
+            continue
 
         found_any = True
         new_seen.add(key)
@@ -268,7 +228,7 @@ def main():
         )
         print(msg)
         send_telegram(msg)
-        time.sleep(1)  # be nice to Telegram API
+        time.sleep(1)
 
     if not found_any:
         print("No new near-MRP Hot Wheels listings this run.")
