@@ -5,12 +5,6 @@ Hot Wheels MRP Watcher
 Searches Amazon.in and FirstCry for "hot wheels" listings and sends a
 Telegram notification whenever a listing is found priced near one of the
 known MRP price points.
-
-Notes / limitations:
-- Amazon actively blocks scrapers with captchas and bot-detection. This
-  script can route requests through ScraperAPI (if SCRAPERAPI_KEY is set)
-  to reduce blocking.
-- This is for personal shopping alerts only. Don't hammer the sites.
 """
 
 import os
@@ -20,10 +14,6 @@ import time
 import sys
 import requests
 from bs4 import BeautifulSoup
-
-# ---------------------------------------------------------------------------
-# CONFIG
-# ---------------------------------------------------------------------------
 
 SEARCH_TERM = "hot wheels"
 
@@ -46,7 +36,6 @@ SCRAPERAPI_KEY = os.environ.get("SCRAPERAPI_KEY", "")
 
 
 def proxied_get(url, timeout=30):
-    """Fetch a URL, routing through ScraperAPI if a key is configured."""
     if SCRAPERAPI_KEY:
         proxy_url = "https://api.scraperapi.com/"
         params = {"api_key": SCRAPERAPI_KEY, "url": url}
@@ -124,25 +113,46 @@ def get_amazon_listings():
             return results
         print(f"[DEBUG] Amazon page fetched OK, {len(resp.text)} chars")
         soup = BeautifulSoup(resp.text, "html.parser")
-        cards = soup.select("div[data-component-type='s-search-result']")
-        print(f"[DEBUG] Amazon result cards found: {len(cards)}")
-        for card in cards:
-            title_el = card.select_one("h2 span")
-            link_el = card.select_one("h2 a")
-            price_el = card.select_one("span.a-price > span.a-offscreen")
-            if not (title_el and link_el and price_el):
-                continue
-            title = title_el.get_text(strip=True)
-            price = parse_price(price_el.get_text(strip=True))
+
+        product_links = soup.select("a[href*='/dp/']")
+        print(f"[DEBUG] Amazon product links found: {len(product_links)}")
+
+        seen_links = set()
+        for link_el in product_links:
             href = link_el.get("href", "")
-            link = "https://www.amazon.in" + href if href.startswith("/") else href
+            if "/dp/" not in href:
+                continue
+            full_link = "https://www.amazon.in" + href if href.startswith("/") else href
+            full_link = full_link.split("?")[0]
+            if full_link in seen_links:
+                continue
+
+            title = link_el.get_text(strip=True)
+            if not title:
+                img = link_el.find("img")
+                if img and img.get("alt"):
+                    title = img.get("alt")
+            if not title:
+                continue
+
+            container = link_el
+            for _ in range(4):
+                if container.parent:
+                    container = container.parent
+
+            price_match = re.search(r"₹\s?[\d,]+(?:\.\d+)?", container.get_text())
+            if not price_match:
+                continue
+            price = parse_price(price_match.group())
             if price is None:
                 continue
+
+            seen_links.add(full_link)
             results.append({
                 "site": "Amazon",
-                "title": title,
+                "title": title[:150],
                 "price": price,
-                "link": link.split("?")[0],
+                "link": full_link,
             })
     except Exception as e:
         print(f"[ERROR] Amazon scrape failed: {e}")
@@ -159,24 +169,39 @@ def get_firstcry_listings():
             return results
         print(f"[DEBUG] FirstCry page fetched OK, {len(resp.text)} chars")
         soup = BeautifulSoup(resp.text, "html.parser")
-        cards = soup.select("li.pdct_list, div.prod_dtl, div.item")
-        print(f"[DEBUG] FirstCry result cards found: {len(cards)}")
-        for card in cards:
-            title_el = card.select_one("a[title]")
-            price_el = card.select_one(".prc, .price, span.rupee")
-            if not (title_el and price_el):
+
+        candidates = soup.select("a[title]")
+        print(f"[DEBUG] FirstCry title-links found: {len(candidates)}")
+
+        seen_links = set()
+        for link_el in candidates:
+            title = link_el.get("title", "").strip()
+            href = link_el.get("href", "")
+            if not title or not href:
                 continue
-            title = title_el.get("title") or title_el.get_text(strip=True)
-            price = parse_price(price_el.get_text(strip=True))
-            href = title_el.get("href", "")
-            link = href if href.startswith("http") else "https://www.firstcry.com" + href
+            full_link = href if href.startswith("http") else "https://www.firstcry.com" + href
+            full_link = full_link.split("?")[0]
+            if full_link in seen_links:
+                continue
+
+            container = link_el
+            for _ in range(5):
+                if container.parent:
+                    container = container.parent
+
+            price_match = re.search(r"₹\s?[\d,]+(?:\.\d+)?", container.get_text())
+            if not price_match:
+                continue
+            price = parse_price(price_match.group())
             if price is None:
                 continue
+
+            seen_links.add(full_link)
             results.append({
                 "site": "FirstCry",
-                "title": title,
+                "title": title[:150],
                 "price": price,
-                "link": link.split("?")[0],
+                "link": full_link,
             })
     except Exception as e:
         print(f"[ERROR] FirstCry scrape failed: {e}")
@@ -200,10 +225,7 @@ def main():
         for item in all_listings:
             print(f"  - {item['site']}: Rs.{item['price']:.0f} | {item['title'][:70]}")
     else:
-        print("[DEBUG] No listings fetched at all from either site. "
-              "This usually means the site blocked the scraper (captcha/bot "
-              "detection) or the page structure changed. Check for a 403/blocked "
-              "warning above.")
+        print("[DEBUG] No listings fetched at all from either site.")
 
     found_any = False
     for item in all_listings:
