@@ -8,7 +8,7 @@ known MRP bands:
 
     Mainline        -> MRP 179
     Silver Series    -> MRP 299
-    Premium Series   -> MRP 599
+    Premium Series   -> MRP 549
 
 "Near MRP" = price is not marked up much above MRP (no scalper pricing)
 and not absurdly low (likely a different/damaged item). Tolerance is
@@ -38,16 +38,11 @@ from bs4 import BeautifulSoup
 
 SEARCH_TERM = "hot wheels"
 
-# (label, mrp, tolerance_fraction)
-# tolerance_fraction = how far ABOVE mrp is still considered "at MRP"
-# and how far BELOW mrp before we assume it's a different/mismarked item.
-MRP_BANDS = [
-    ("Mainline", 179, 0.15),
-    ("Silver Series", 299, 0.15),
-    ("Premium Series", 599, 0.15),
-]
+# All known Hot Wheels MRP price points. Any listing within +/- TOLERANCE_RS
+# rupees of ANY of these prices will trigger a notification.
+KNOWN_MRPS = [179, 299, 298, 167, 549, 599, 749, 899]
 
-LOWER_SLACK = 0.30  # allow price to be up to 30% below MRP (real discounts)
+TOLERANCE_RS = 100  # allow price to be off by up to +-100 rupees from any known MRP
 
 SEEN_FILE = os.path.join(os.path.dirname(__file__), "seen.json")
 
@@ -83,13 +78,17 @@ def save_seen(seen):
 
 
 def matches_mrp_band(price):
-    """Return the matching band label if price falls near any known MRP."""
-    for label, mrp, tol in MRP_BANDS:
-        upper = mrp * (1 + tol)
-        lower = mrp * (1 - LOWER_SLACK)
-        if lower <= price <= upper:
-            return label, mrp
-    return None, None
+    """Return the closest known MRP if price is within TOLERANCE_RS of it."""
+    best_mrp = None
+    best_diff = None
+    for mrp in KNOWN_MRPS:
+        diff = abs(price - mrp)
+        if diff <= TOLERANCE_RS and (best_diff is None or diff < best_diff):
+            best_mrp = mrp
+            best_diff = diff
+    if best_mrp is None:
+        return None, None
+    return f"~₹{best_mrp} MRP", best_mrp
 
 
 def send_telegram(message):
@@ -206,8 +205,25 @@ def main():
     seen = load_seen()
     new_seen = set(seen)
 
-    all_listings = get_amazon_listings() + get_firstcry_listings()
+    amazon_listings = get_amazon_listings()
+    firstcry_listings = get_firstcry_listings()
+    print(f"[DEBUG] Amazon listings fetched: {len(amazon_listings)}")
+    print(f"[DEBUG] FirstCry listings fetched: {len(firstcry_listings)}")
+
+    all_listings = amazon_listings + firstcry_listings
     print(f"Fetched {len(all_listings)} total listings.")
+
+    # Print every price found, so we can see in the Actions log whether
+    # scraping is actually returning real data or coming back empty/blocked.
+    if all_listings:
+        print("[DEBUG] All prices found this run:")
+        for item in all_listings:
+            print(f"  - {item['site']}: Rs.{item['price']:.0f} | {item['title'][:70]}")
+    else:
+        print("[DEBUG] No listings fetched at all from either site. "
+              "This usually means the site blocked the scraper (captcha/bot "
+              "detection) or the page structure changed. Check for a 403/blocked "
+              "warning above.")
 
     found_any = False
     for item in all_listings:
@@ -225,7 +241,7 @@ def main():
         msg = (
             f"🔥 <b>Hot Wheels near MRP found!</b>\n"
             f"Site: {item['site']}\n"
-            f"Category guess: {band_label} (MRP ₹{mrp})\n"
+            f"Matched: {band_label}\n"
             f"Price: ₹{item['price']:.0f}\n"
             f"Title: {item['title'][:120]}\n"
             f"{item['link']}"
