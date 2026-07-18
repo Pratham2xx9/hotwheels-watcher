@@ -57,6 +57,22 @@ HEADERS = {
 TELEGRAM_BOT_TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN", "")
 TELEGRAM_CHAT_ID = os.environ.get("TELEGRAM_CHAT_ID", "")
 
+# ScraperAPI (https://www.scraperapi.com/) routes requests through rotating
+# residential/datacenter proxies so Amazon doesn't instantly block the
+# request the way it blocks GitHub's shared runner IPs (503 errors).
+# Free tier gives 1000 requests/month. Leave blank to skip proxying
+# (Amazon will likely keep returning 503 from GitHub Actions in that case).
+SCRAPERAPI_KEY = os.environ.get("SCRAPERAPI_KEY", "")
+
+
+def proxied_get(url, timeout=30):
+    """Fetch a URL, routing through ScraperAPI if a key is configured."""
+    if SCRAPERAPI_KEY:
+        proxy_url = "https://api.scraperapi.com/"
+        params = {"api_key": SCRAPERAPI_KEY, "url": url}
+        return requests.get(proxy_url, params=params, timeout=timeout)
+    return requests.get(url, headers=HEADERS, timeout=timeout)
+
 
 # ---------------------------------------------------------------------------
 # HELPERS
@@ -132,12 +148,14 @@ def get_amazon_listings():
     url = f"https://www.amazon.in/s?k={SEARCH_TERM.replace(' ', '+')}"
     results = []
     try:
-        resp = requests.get(url, headers=HEADERS, timeout=20)
+        resp = proxied_get(url, timeout=30)
         if resp.status_code != 200:
             print(f"[WARN] Amazon returned status {resp.status_code}")
             return results
+        print(f"[DEBUG] Amazon page fetched OK, {len(resp.text)} chars")
         soup = BeautifulSoup(resp.text, "html.parser")
         cards = soup.select("div[data-component-type='s-search-result']")
+        print(f"[DEBUG] Amazon result cards found: {len(cards)}")
         for card in cards:
             title_el = card.select_one("h2 span")
             link_el = card.select_one("h2 a")
@@ -173,8 +191,10 @@ def get_firstcry_listings():
         if resp.status_code != 200:
             print(f"[WARN] FirstCry returned status {resp.status_code}")
             return results
+        print(f"[DEBUG] FirstCry page fetched OK, {len(resp.text)} chars")
         soup = BeautifulSoup(resp.text, "html.parser")
         cards = soup.select("li.pdct_list, div.prod_dtl, div.item")
+        print(f"[DEBUG] FirstCry result cards found: {len(cards)}")
         for card in cards:
             title_el = card.select_one("a[title]")
             price_el = card.select_one(".prc, .price, span.rupee")
