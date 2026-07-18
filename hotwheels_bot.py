@@ -231,6 +231,9 @@ def get_kaykay_listings():
     except Exception as e:
         print(f"[ERROR] Kay Kay seller scrape failed: {e}")
     return results
+
+
+def get_amazon_listings():
     url = f"https://www.amazon.in/s?k={SEARCH_TERM.replace(' ', '+')}"
     results = []
     try:
