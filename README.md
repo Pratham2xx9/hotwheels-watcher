@@ -11,7 +11,7 @@ koi listing in MRP bands ke aas-paas milti hai, Telegram pe alert bhejta hai:
 
 (Thoda upar-neeche tolerance already built-in hai script me.)
 
-Runs automatically every **15 minutes**, 24/7, via GitHub Actions — free,
+Runs automatically every **5 minutes**, 24/7, via GitHub Actions — free,
 no server chahiye.
 
 ---
