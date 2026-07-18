@@ -40,7 +40,7 @@ SEARCH_TERM = "hot wheels"
 
 # All known Hot Wheels MRP price points. Any listing within +/- TOLERANCE_RS
 # rupees of ANY of these prices will trigger a notification.
-KNOWN_MRPS = [179, 299, 298, 167, 549, 599, 749, 899]
+KNOWN_MRPS = [179, 299, 298, 167, 549, 599]
 
 TOLERANCE_RS = 100  # allow price to be off by up to +-100 rupees from any known MRP
 
