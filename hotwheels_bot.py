@@ -8,7 +8,7 @@ known MRP bands:
 
     Mainline        -> MRP 179
     Silver Series    -> MRP 299
-    Premium Series   -> MRP 599
+    Premium Series   -> MRP 549
 
 "Near MRP" = price is not marked up much above MRP (no scalper pricing)
 and not absurdly low (likely a different/damaged item). Tolerance is
