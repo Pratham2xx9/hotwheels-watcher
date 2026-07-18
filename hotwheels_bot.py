@@ -40,11 +40,17 @@ SEARCH_TERM = "hot wheels"
 
 # All known Hot Wheels MRP price points. Any listing within +/- TOLERANCE_RS
 # rupees of ANY of these prices will trigger a notification.
-KNOWN_MRPS = [179, 299, 298, 167, 549, 599]
+KNOWN_MRPS = [179, 299, 298, 167, 549]
 
 TOLERANCE_RS = 100  # allow price to be off by up to +-100 rupees from any known MRP
 
 SEEN_FILE = os.path.join(os.path.dirname(__file__), "seen.json")
+
+# --- Kay Kay Overseas Corporation seller watch ---
+# Notifies on ANY Hot Wheels listing/restock from this specific seller,
+# regardless of price/MRP match.
+KAYKAY_SELLER_ID = "A2GTG1HPYW8M2P"
+KAYKAY_SEEN_FILE = os.path.join(os.path.dirname(__file__), "kaykay_seen.json")
 
 HEADERS = {
     "User-Agent": (
@@ -90,6 +96,21 @@ def load_seen():
 
 def save_seen(seen):
     with open(SEEN_FILE, "w") as f:
+        json.dump(sorted(seen), f, indent=2)
+
+
+def load_kaykay_seen():
+    if os.path.exists(KAYKAY_SEEN_FILE):
+        try:
+            with open(KAYKAY_SEEN_FILE, "r") as f:
+                return set(json.load(f))
+        except Exception:
+            return set()
+    return set()
+
+
+def save_kaykay_seen(seen):
+    with open(KAYKAY_SEEN_FILE, "w") as f:
         json.dump(sorted(seen), f, indent=2)
 
 
@@ -158,7 +179,58 @@ def extract_price_from_container(container_text):
 # AMAZON SCRAPER
 # ---------------------------------------------------------------------------
 
-def get_amazon_listings():
+def get_kaykay_listings():
+    """Search Amazon for 'hot wheels' filtered to only Kay Kay Overseas
+    Corporation's listings, using Amazon's built-in seller filter (me=)."""
+    url = (
+        f"https://www.amazon.in/s?k={SEARCH_TERM.replace(' ', '+')}"
+        f"&me={KAYKAY_SELLER_ID}"
+    )
+    results = []
+    try:
+        resp = proxied_get(url, timeout=30)
+        if resp.status_code != 200:
+            print(f"[WARN] Kay Kay seller page returned status {resp.status_code}")
+            return results
+        print(f"[DEBUG] Kay Kay seller page fetched OK, {len(resp.text)} chars")
+        soup = BeautifulSoup(resp.text, "html.parser")
+
+        product_links = soup.select("a[href*='/dp/']")
+        print(f"[DEBUG] Kay Kay product links found: {len(product_links)}")
+
+        seen_links = set()
+        for link_el in product_links:
+            href = link_el.get("href", "")
+            if "/dp/" not in href:
+                continue
+            full_link = "https://www.amazon.in" + href if href.startswith("/") else href
+            full_link = full_link.split("?")[0]
+            if full_link in seen_links:
+                continue
+
+            title = link_el.get_text(strip=True)
+            if not title:
+                img = link_el.find("img")
+                if img and img.get("alt"):
+                    title = img.get("alt")
+            if not title:
+                continue
+
+            container = link_el
+            for _ in range(4):
+                if container.parent:
+                    container = container.parent
+            price = extract_price_from_container(container.get_text())
+
+            seen_links.add(full_link)
+            results.append({
+                "title": title[:150],
+                "price": price,  # may be None if price wasn't detectable
+                "link": full_link,
+            })
+    except Exception as e:
+        print(f"[ERROR] Kay Kay seller scrape failed: {e}")
+    return results
     url = f"https://www.amazon.in/s?k={SEARCH_TERM.replace(' ', '+')}"
     results = []
     try:
@@ -337,6 +409,32 @@ def main():
         print("No new near-MRP Hot Wheels listings this run.")
 
     save_seen(new_seen)
+
+    # --- Kay Kay Overseas Corporation seller watch ---
+    # Notifies on ANY Hot Wheels listing from this seller, regardless of
+    # price. If an item disappears (out of stock/delisted) and later
+    # reappears, it's treated as a fresh restock and notified again.
+    kaykay_listings = get_kaykay_listings()
+    print(f"[DEBUG] Kay Kay listings fetched: {len(kaykay_listings)}")
+
+    kaykay_seen = load_kaykay_seen()
+    current_kaykay_links = {item["link"] for item in kaykay_listings}
+
+    for item in kaykay_listings:
+        if item["link"] in kaykay_seen:
+            continue
+        price_str = f"₹{item['price']:.0f}" if item["price"] is not None else "price not detected"
+        msg = (
+            f"⭐️🔥🔥 <b>KAY KAY OVERSEAS — New / Restocked Hot Wheels!</b> 🔥🔥⭐️\n"
+            f"Price: {price_str}\n"
+            f"Title: {item['title'][:120]}\n"
+            f"{item['link']}"
+        )
+        print(msg)
+        send_telegram(msg)
+        time.sleep(1)
+
+    save_kaykay_seen(current_kaykay_links)
 
 
 if __name__ == "__main__":
